@@ -65,15 +65,20 @@ class Photons:
         print('========================================')
         
        
-    '''
-    ------------------------
-    due to the differences in the previous code you need to specify the 
-    "measurement mode" yourself when creating the header dictionary
-    ------------------------
-    '''
+   
+        '''
+        -----------------------------------------------------------------------------------
+        This function puts all the data about channel, timestamp, and overflow information
+        into an array to be written to binary 
+        it also gets the header information containing the state of the .ttbin file at time of measurement. 
+        you need to specify the measurementmode yourself
+        -----------------------------------------------------------------------------------
+        '''
+
+        #n_events here is the size of the buffer to work with in order to speed up computational time
     
-    def get_header_info(self, measurement_mode, manual_resolution = 0):
-        
+    
+    def get_arival_data_and_header(self,measurement_mode, manual_resolution = 0, n_events = 1000000):
         
         self.header = self.filereader.getConfiguration()
         
@@ -87,20 +92,11 @@ class Photons:
         else:
             self.header['Resolution'] = manual_resolution
         
-        '''
-        -----------------------------------------------------------------------------------
-        This function puts all the data about channel, timestamp, and overflow information
-        into an array to be written to binary 
-        -----------------------------------------------------------------------------------
-        '''
-
-        #n_events here is the size of the buffer to work with in order to speed up computational time
-    
-    
-    def get_arival_data(self, n_events = 1000000):
+        
         
         filereader = TimeTagger.FileReader(self.file_path)
-         
+        
+        
         #create empty array for each data type. Cannot do =[] because the list will have an extra variable dtype
         Complete_Channel_Array = np.array([])
         Complete_Arrival_Time = np.array([])
@@ -136,6 +132,7 @@ class Photons:
         self.all_photon_data = All_Photon_Data
         self.all_photon_data_no_OF = All_Photon_Data[:2,:]
         
+      
       
         
         
@@ -716,3 +713,6 @@ class Photons:
         time_end = timing.time()
         print('Total time elapsed is %4f s' % (time_end - time_start))
     
+
+
+
