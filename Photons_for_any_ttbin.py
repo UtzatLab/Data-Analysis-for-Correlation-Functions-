@@ -42,8 +42,7 @@ class Photons:
         self.auto_corr = None     #  dictionary to store the correlations
         self.datatype = np.uint64 
         
-        self.photon_trace = None
-        self.photon_trace_bins = None
+       
         self.ch0 = None
         self.ch1 = None
         self.ch2 = None
@@ -66,6 +65,7 @@ class Photons:
         
        
    
+    
         '''
         -----------------------------------------------------------------------------------
         This function puts all the data about channel, timestamp, and overflow information
@@ -77,13 +77,11 @@ class Photons:
 
         #n_events here is the size of the buffer to work with in order to speed up computational time
     
-    
-    def get_arival_data_and_header(self,measurement_mode, manual_resolution = 0, n_events = 1000000):
-        
+ 
+    def get_arival_data_and_header(self, measurement_mode, manual_resolution=0, n_events=1000000):
+        start_time = timing.time()
         self.header = self.filereader.getConfiguration()
-        
         self.header['MeasurementMode'] = measurement_mode
-        
         inputs = self.header['inputs']
         
         if 'resolution rms' in self.header:
@@ -91,50 +89,38 @@ class Photons:
             self.header['Resolution'] = np.mean(resolution_rms)
         else:
             self.header['Resolution'] = manual_resolution
-        
-        
-        
+            
         filereader = TimeTagger.FileReader(self.file_path)
         
-        
-        #create empty array for each data type. Cannot do =[] because the list will have an extra variable dtype
-        Complete_Channel_Array = np.array([])
-        Complete_Arrival_Time = np.array([])
-        Complete_Overflow_Array = np.array([])
-        Complete_Missed_Events = np.array([])
-        while filereader.hasData():
-            # getData() does not return timestamps, but an instance of TimeTagStreamBuffer
-            # that contains more information than just the timestamp
-            data = filereader.getData(n_events=n_events)
+        # create empty arrays using np.empty()
+        Complete_Channel_Array = np.empty(0, dtype=np.int64)
+        Complete_Arrival_Time = np.empty(0, dtype=np.uint64)
+        Complete_Overflow_Array = np.empty(0, dtype=np.uint8)
+        Complete_Missed_Events = np.empty(0, dtype=np.uint32)
+        data_list = [Complete_Channel_Array, Complete_Arrival_Time, Complete_Overflow_Array, Complete_Missed_Events]
     
-            # With the following methods, we can retrieve a numpy array for the particular information:
-            channel = data.getChannels()   # The channel numbers
-            Complete_Channel_Array = np.concatenate((Complete_Channel_Array, channel))       
-          #  print(channel)
+        while filereader.hasData():
+            data = filereader.getData(n_events=n_events)
+            channel = data.getChannels()
+            timestamps = data.getTimestamps()
+            overflow_types = data.getEventTypes()
+            missed_events = data.getMissedEvents()
             
-            timestamps = data.getTimestamps()       # The timestamps in ps
-            Complete_Arrival_Time = np.concatenate((Complete_Arrival_Time, timestamps))
-          #  print(timestamps)
-            
-            overflow_types = data.getEventTypes()   # TimeTag = 0, Error = 1, OverflowBegin = 2, OverflowEnd = 3, MissedEvents = 4
-            Complete_Overflow_Array = np.concatenate((Complete_Overflow_Array, overflow_types))
-          #  print(overflow_types)
-            
-            missed_events = data.getMissedEvents()  # The numbers of missed events in case of overflow
-            Complete_Missed_Events = np.concatenate((Complete_Missed_Events, missed_events))
-           # print(missed_events)
-            
-
-        All_Photon_Data = np.vstack((Complete_Channel_Array, Complete_Arrival_Time, Complete_Overflow_Array, Complete_Missed_Events))
-       # print(All_Photon_Data)
+            for i, arr in enumerate(data_list):
+                data_list[i] = np.concatenate((arr, eval(f"{'channel' if i == 0 else 'timestamps' if i == 1 else 'overflow_types' if i == 2 else 'missed_events'}")))
+        
+        # concatenate arrays using np.concatenate()
+        All_Photon_Data = np.concatenate([arr[np.newaxis, :] for arr in data_list], axis=0)
+        
+        # use np.transpose() instead of vstack()
+        self.all_photon_data = All_Photon_Data
+        self.all_photon_data_no_OF = self.all_photon_data[:2, :]
+       
         del filereader
         
-        self.all_photon_data = All_Photon_Data
-        self.all_photon_data_no_OF = All_Photon_Data[:2,:]
-        
-      
-      
-        
+        end_time = timing.time()
+        total_time = end_time - start_time
+        print('Time elapsed for data header function is %4f s' % total_time)
         
     '''
     -----------------------------------------------------------------------------------
@@ -200,7 +186,7 @@ class Photons:
                flattened_array[3*i] = t3_type_array_no_pulse[0][i]
                flattened_array[3*i+1] = t3_type_array_no_pulse[1][i]
                flattened_array[3*i+2] = t3_type_array_no_pulse[2][i]
-         
+        test = flattened_array
         flattened_array.astype(self.datatype).tofile(fout)
         
         fout.close()
@@ -712,7 +698,6 @@ class Photons:
     
         time_end = timing.time()
         print('Total time elapsed is %4f s' % (time_end - time_start))
-    
 
 
 
