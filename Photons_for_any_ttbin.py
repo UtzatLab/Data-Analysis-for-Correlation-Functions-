@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 '''
 Created on Mon May 22 14:12:49 2023
 
@@ -31,11 +30,10 @@ from time import sleep
 class Photons:
     
     
-    def __init__(self, file_path,measurement_mode, memory_limit = 1):
+    def __init__(self, file_path, measurement_mode, simulation = False, file_name = None, memory_limit = 1):
         
-        # properties
-        self.filereader = TimeTagger.FileReader(file_path)
-        self.file_path = file_path
+
+        
        # self.header_size = None # size of headers in bytes
         self.header = None # dictionary for header information
         self.memory_limit = memory_limit
@@ -43,25 +41,35 @@ class Photons:
         self.cross_corr = None
         self.auto_corr = None     #  dictionary to store the correlations
         self.datatype = np.uint64 
-        
+        self.simulaiton = simulation
        
         self.ch0 = None
         self.ch1 = None
         self.ch2 = None
         self.ch3 = None
         self.ch4= None
-        
+   
         # extract photon stream file info
-        self.path_str = os.path.split(file_path)[0] #gets file path
-        self.file_name = os.path.split(file_path)[1].split('.')[0] #gets name i.e. File is dot8.1.ttbin; returns dot8
-        self.file_ext = os.path.split(file_path)[1].split('.')[1] # gets run i.e. File is dot8.1.ttbin; returns dot1
+        if simulation:
+            self.path_str = os.path.split(file_path)[0]
+            self.file_name = file_name
+            self.header = {}
+    
+        else:
+            self.filereader = TimeTagger.FileReader(file_path)
+            self.file_path = file_path
+            self.path_str = os.path.split(file_path)[0] #gets file path
+            self.file_name = os.path.split(file_path)[1].split('.')[0] #gets name i.e. File is dot8.1.ttbin; returns dot8
+            self.file_ext = os.path.split(file_path)[1].split('.')[1] # gets run i.e. File is dot8.1.ttbin; returns dot1
+            self.header = self.filereader.getConfiguration()
+            
         self.g2 = None
         self.all_photon_data = None
         self.all_photon_data_no_OF = None
         self.intensity_counts = None
         self.sync_channel = None
         
-        self.header = self.filereader.getConfiguration()
+       
         self.header['MeasurementMode'] = measurement_mode
         print('========================================')
         print('Photon class created')
@@ -83,49 +91,51 @@ class Photons:
     
  
     def get_arival_data_and_header(self, manual_resolution=0, n_events=1000000):
-        start_time = timing.time()
-       
-        
-        inputs = self.header['inputs']
-        
-        if 'resolution rms' in self.header:
-            resolution_rms = [d['resolution rms'] for d in inputs]
-            self.header['Resolution'] = np.mean(resolution_rms)
-        else:
-            self.header['Resolution'] = manual_resolution
+        if self.simulaiton == False:
             
-        filereader = TimeTagger.FileReader(self.file_path)
+            start_time = timing.time()
+            
+                
+            inputs = self.header['inputs']
+            
+            if 'resolution rms' in self.header:
+                resolution_rms = [d['resolution rms'] for d in inputs]
+                self.header['Resolution'] = np.mean(resolution_rms)
+            else:
+                self.header['Resolution'] = manual_resolution
+                
+            filereader = TimeTagger.FileReader(self.file_path)
+            
+            # create empty arrays using np.empty()
+            Complete_Channel_Array = np.empty(0, dtype=np.int64)
+            Complete_Arrival_Time = np.empty(0, dtype=np.uint64)
+            Complete_Overflow_Array = np.empty(0, dtype=np.uint8)
+            Complete_Missed_Events = np.empty(0, dtype=np.uint32)
+            data_list = [Complete_Channel_Array, Complete_Arrival_Time, Complete_Overflow_Array, Complete_Missed_Events]
         
-        # create empty arrays using np.empty()
-        Complete_Channel_Array = np.empty(0, dtype=np.int64)
-        Complete_Arrival_Time = np.empty(0, dtype=np.uint64)
-        Complete_Overflow_Array = np.empty(0, dtype=np.uint8)
-        Complete_Missed_Events = np.empty(0, dtype=np.uint32)
-        data_list = [Complete_Channel_Array, Complete_Arrival_Time, Complete_Overflow_Array, Complete_Missed_Events]
+            while filereader.hasData():
+                data = filereader.getData(n_events=n_events)
+                channel = data.getChannels()
+                timestamps = data.getTimestamps()
+                overflow_types = data.getEventTypes()
+                missed_events = data.getMissedEvents()
+                
+                for i, arr in enumerate(data_list):
+                    data_list[i] = np.concatenate((arr, eval(f"{'channel' if i == 0 else 'timestamps' if i == 1 else 'overflow_types' if i == 2 else 'missed_events'}")))
+            
     
-        while filereader.hasData():
-            data = filereader.getData(n_events=n_events)
-            channel = data.getChannels()
-            timestamps = data.getTimestamps()
-            overflow_types = data.getEventTypes()
-            missed_events = data.getMissedEvents()
+            All_Photon_Data = np.concatenate([arr[np.newaxis, :] for arr in data_list], axis=0)
             
-            for i, arr in enumerate(data_list):
-                data_list[i] = np.concatenate((arr, eval(f"{'channel' if i == 0 else 'timestamps' if i == 1 else 'overflow_types' if i == 2 else 'missed_events'}")))
-        
-        # concatenate arrays using np.concatenate()
-        All_Photon_Data = np.concatenate([arr[np.newaxis, :] for arr in data_list], axis=0)
-        
-        # use np.transpose() instead of vstack()
-        self.all_photon_data = All_Photon_Data
-        self.all_photon_data_no_OF = self.all_photon_data[:2, :]
-       
-        del filereader
-        
-        end_time = timing.time()
-        total_time = end_time - start_time
-        print('Time elapsed for data header function is %4f s' % total_time)
-        
+         
+            self.all_photon_data = All_Photon_Data
+            self.all_photon_data_no_OF = self.all_photon_data[:2, :]
+           
+            del filereader
+            
+            end_time = timing.time()
+            total_time = end_time - start_time
+            print('Time elapsed for data header function is %4f s' % total_time)
+            
     '''
     -----------------------------------------------------------------------------------
     this funciton writes all the data into an array with a single row
@@ -142,63 +152,65 @@ class Photons:
     -----------------------------------------------------------------------------------
     '''
     def write_total_data_to_file(self, sync_channel = 1):
-        time_start = timing.time()
-      
+       if self.simulaiton == False:
         
-        fout = open(self.path_str +os.sep + self.file_name + '.photons', 'wb')
-        
-        relative_photon_data = np.array(self.all_photon_data_no_OF)  # if for some reason the array isnt in chronological order np.array([list(x) for x in zip(*sorted(zip(*self.all_photon_data_no_OF), key=lambda x: x[1]))])
-        self.sync_channel = sync_channel
-        
-        if self.header['MeasurementMode'] == 2:
-      
-            flattened_array = np.zeros(self.all_photon_data_no_OF.shape[1]*2)
-            for i in range(self.all_photon_data_no_OF.shape[1]):
-                flattened_array[2*i] = self.all_photon_data_no_OF[0][i]
-                flattened_array[2*i+1] = self.all_photon_data_no_OF[1][i]
+            time_start = timing.time()
+          
             
-  
-            flattened_array.astype(self.datatype).tofile(fout)
+            fout = open(self.path_str +os.sep + self.file_name + '.photons', 'wb')
          
+            relative_photon_data = np.array(self.all_photon_data_no_OF)  # if for some reason the array isnt in chronological order np.array([list(x) for x in zip(*sorted(zip(*self.all_photon_data_no_OF), key=lambda x: x[1]))])
+            self.sync_channel = sync_channel
             
-         
-        elif self.header['MeasurementMode'] == 3:
-           
-            
-            mask = self.all_photon_data_no_OF[0,:] == sync_channel
-            pulse_channels = self.all_photon_data_no_OF[:, mask]
-            time_differences = np.diff(pulse_channels[1,:])
-            self.header['SyncRate'] = 1/(np.mean(time_differences))
-            
+            if self.header['MeasurementMode'] == 2:
+          
+                flattened_array = np.zeros(self.all_photon_data_no_OF.shape[1]*2)
+                for i in range(self.all_photon_data_no_OF.shape[1]):
+                    flattened_array[2*i] = self.all_photon_data_no_OF[0][i]
+                    flattened_array[2*i+1] = self.all_photon_data_no_OF[1][i]
+                
+      
+                flattened_array.astype(self.datatype).tofile(fout)
+             
+                
+             
+            elif self.header['MeasurementMode'] == 3:
                
-            mask = relative_photon_data[0,:] == sync_channel
-            diffs = np.diff(np.where(np.append(False, mask)))[0]
-            starts = np.where(mask)[0]
+                
+                mask = self.all_photon_data_no_OF[0,:] == sync_channel
+                pulse_channels = self.all_photon_data_no_OF[:, mask]
+                time_differences = np.diff(pulse_channels[1,:])
+                self.header['SyncRate'] = 1/(np.mean(time_differences))
+                
+                   
+                mask = relative_photon_data[0,:] == sync_channel
+                diffs = np.diff(np.where(np.append(False, mask)))[0]
+                starts = np.where(mask)[0]
+                
+                for start, diff in zip(starts, diffs):
+                    relative_photon_data[1, start : start + diff] -= relative_photon_data[1, start]
+             
+                t3_type_array = np.delete(np.concatenate((self.all_photon_data_no_OF, relative_photon_data),axis = 0),2,0)
+            #print (t3_type_array[:,:20])
             
-            for start, diff in zip(starts, diffs):
-                relative_photon_data[1, start : start + diff] -= relative_photon_data[1, start]
-         
-            t3_type_array = np.delete(np.concatenate((self.all_photon_data_no_OF, relative_photon_data),axis = 0),2,0)
-        #print (t3_type_array[:,:20])
-        
-            mask = t3_type_array[0,:] != sync_channel
-            t3_type_array_no_pulse= t3_type_array[:,mask]
-       # print(t3_type_array_no_pulse)
-            flattened_array = np.zeros(t3_type_array_no_pulse.shape[1]*3)
-        
-            for i in range(t3_type_array_no_pulse.shape[1]):
-               flattened_array[3*i] = t3_type_array_no_pulse[0][i]
-               flattened_array[3*i+1] = t3_type_array_no_pulse[1][i]
-               flattened_array[3*i+2] = t3_type_array_no_pulse[2][i]
-       
-        flattened_array.astype(self.datatype).tofile(fout)
-        
-        fout.close()
-        
-       
-        time_end = timing.time()
-        total_time = time_end - time_start
-        print('Time elapsed to write to .photons file is %4f s' % total_time)
+                mask = t3_type_array[0,:] != sync_channel
+                t3_type_array_no_pulse= t3_type_array[:,mask]
+           # print(t3_type_array_no_pulse)
+                flattened_array = np.zeros(t3_type_array_no_pulse.shape[1]*3)
+            
+                for i in range(t3_type_array_no_pulse.shape[1]):
+                   flattened_array[3*i] = t3_type_array_no_pulse[0][i]
+                   flattened_array[3*i+1] = t3_type_array_no_pulse[1][i]
+                   flattened_array[3*i+2] = t3_type_array_no_pulse[2][i]
+           
+            flattened_array.astype(self.datatype).tofile(fout)
+            
+            fout.close()
+            
+           
+            time_end = timing.time()
+            total_time = time_end - time_start
+            print('Time elapsed to write to .photons file is %4f s' % total_time)
 
 
     '''
@@ -227,9 +239,9 @@ class Photons:
         counts = self.buffer_size * self.header['MeasurementMode']
         fout_file = self.path_str + os.sep+ file_out + '.photons'
         fin_file = self.path_str +os.sep+ file_in + '.photons'
-        fout = open(fout_file, 'wb')
         fin = open(fin_file, 'rb')
-    
+        fout = open(fout_file, 'wb')
+       
         while 1:
            batch = np.fromfile(fin, dtype=self.datatype, count = counts)
            batch[::self.header['MeasurementMode']] = 0 # set the channel number to be 0
@@ -553,6 +565,7 @@ class Photons:
         ch1_min = np.inf # minimum time tag
         ch0_count = len(ch0)
         ch1_count = len(ch1) # photon numbers in each channel
+   
         ch0_min = min(ch0_min, min(ch0))
         ch1_min = min(ch1_min, min(ch1))
 
@@ -658,4 +671,3 @@ class Photons:
     
         time_end = timing.time()
         print('Total time elapsed is %4f s' % (time_end - time_start))
-
