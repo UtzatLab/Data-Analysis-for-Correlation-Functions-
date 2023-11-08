@@ -7,3 +7,6 @@ the functions include:
   a pulse adapted log space correlation function,
   
   The PCFS Code uses the functions provided in the photons code to do full PCFS analysis
+
+  Simulation file coming soon once bugs are ironed out
+  
