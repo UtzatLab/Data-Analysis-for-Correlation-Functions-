@@ -7,6 +7,11 @@ from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit
 from scipy import interpolate
 
+
+def extract_number(s):
+    return int(s.split()[-1])
+
+
 class PCFS:
 
     '''
@@ -30,20 +35,12 @@ class PCFS:
         self.measurement_mode = measurement_mode
         # extract files information
         self.path_str = folder_path
-       
         self.PCFS_ID = os.path.split(folder_path)[1] # extract the folder name, i.e., 'DotA'
-        
         os.chdir(folder_path)
         file_pos = glob.glob('*.pos')
-        ttbin_files = glob.glob('*ttbin')
-        
         if len(file_pos) == 0:
             print('.pos file not found!')
-            pos_file = os.path.join(self.path_str, 'positions.pos')
-            positions = []
-            for i in range(len(ttbin_files)):
-                stage_pos = ttbin_files[i].split('.')[0]
-             
+      
         self.file_pos = file_pos[0] # with extension
         self.file_number = len(file_pos)
         file_pcfslog = glob.glob('*.pcfslog')
@@ -60,11 +57,7 @@ class PCFS:
 
         # read in the position file as array
         self.get_file_photons() # get all the photons files in the current directory
-        if simulation:
-            self.stage_positions = np.loadtxt(self.file_pos)
-        else:
-            self.stage_positions = np.loadtxt(self.file_pos)*1e-6
-        
+        self.stage_positions = np.loadtxt(self.file_pos)
         
         # read in the metadata of the .pcfslog file and store it as property
         with open(self.file_pcfslog) as f:
@@ -80,12 +73,12 @@ class PCFS:
         self.photons = {}
        
         for f in self.file_stream:
-          
+        
             if simulation:
                 self.photons[f] = Photons(folder_path+ os.sep+ f+'.photons',self.measurement_mode, self.simulation, self.memory_limit)
             else:
                 self.photons[f] = Photons(folder_path+ os.sep+ f+'.1.ttbin',self.measurement_mode, self.simulation, self.memory_limit)
-                
+       
         toc= timing.time()
         print('Total time elapsed to create PCFS class is %4f s' % (toc - tic))
 
@@ -102,9 +95,12 @@ class PCFS:
     '''
     def get_file_photons(self):
      
-        self.file_photons = [f.replace('.photons','') for f in glob.glob('*.photons')] # without extension
-       
-      
+        temp = [f.replace('.photons','') for f in glob.glob('*.photons')] # without extension
+        self.file_photons = sorted(temp, key=extract_number)
+        print(self.file_photons)
+        
+        
+
 
     '''
     This function gets all photon stream data.
@@ -115,7 +111,6 @@ class PCFS:
         self.get_file_photons()
        
         for f in self.file_stream:
-        
             if f not in self.file_photons:
                 self.photons[f].get_arival_data_and_header()
                 self.photons[f].write_total_data_to_file()
@@ -167,10 +162,6 @@ class PCFS:
                 i+=1
                 if self.photons[f].cross_corr is None:
                     self.photons[f].photon_corr(f, 'cross', [1,2], time_bounds, lag_precision, 0)
-                    #plt.plot(self.photons[f].cross_corr['corr_norm'])
-                    #plt.title(f)
-                    #plt.ylim(0,3)
-                    #plt.show()
                 if self.tau is None:
                     self.tau = self.photons[f].cross_corr['lags']
                     self.length_tau = len(self.tau)
@@ -231,8 +222,11 @@ class PCFS:
     This function gets blinking corrected PCFS interferogram.
     '''
     def get_blinking_corrected_PCFS(self):
- 
-        self.blinking_corrected_PCFS_interferogram = 1 - self.cross_corr_interferogram / self.auto_corr_sum_interferogram
+        
+        if self.simulation:
+            self.blinking_corrected_PCFS_interferogram = 1 - self.cross_corr_interferogram
+        else:
+            self.blinking_corrected_PCFS_interferogram = 1 - self.cross_corr_interferogram / self.auto_corr_sum_interferogram
      
 
     '''
@@ -243,7 +237,7 @@ class PCFS:
             self.get_blinking_corrected_PCFS()
 
         # plot PCFS interferogram at different tau
-        x = .2 * (self.stage_positions - white_fringe) # in mm
+        x = 2 * (self.stage_positions - white_fringe) # in mm
   
         ind = np.array([np.argmin(np.abs(self.tau - tau)) for tau in tau_select])
         legends = [tau/1e6 for tau in tau_select] # in us
@@ -348,52 +342,39 @@ class PCFS:
     '''
     This function gets mirrored spectral correlation by interpolation.
     '''
-    def get_mirror_spectral_corr(self, white_fringe_pos, white_fringe_ind, outlier_threshold = 10000):
+    def get_mirror_spectral_corr(self, white_fringe_pos, white_fringe_ind):
         end = -1
         # construct mirrored data
         
-        interferogram = np.nan_to_num(self.blinking_corrected_PCFS_interferogram[:,:end])
-        a,b = interferogram.shape
-        for i in range(a):
-            for j in range(b-2):
-                neighbor_avg = np.mean([interferogram[i, j + 2], interferogram[i, j]])
-                if interferogram[i, j + 1]/neighbor_avg > outlier_threshold:
-                    interferogram[i,j+1] = np.mean([interferogram[i,j+2],interferogram[i,j]])
+        interferogram = self.blinking_corrected_PCFS_interferogram[:,:end]
+     
         mirror_intf = np.hstack((np.fliplr(interferogram[:, white_fringe_ind:]), interferogram[:, white_fringe_ind+1:]))
+     
         temp = white_fringe_pos - self.stage_positions[white_fringe_ind:end]
-       
+     
         temp = temp[::-1]
-        print(temp)
-        #I dont know why the reversal of this array sometimes breaks the interpolation. If the self.mirror_pcfs_interferogram is a uniform array then you should reverse the array
-        if self.simulation:
-            print('working')
-            mirror_stage_pos = np.hstack((temp, self.stage_positions[white_fringe_ind+1:end] - white_fringe_pos))
-            interp_stage_pos = np.arange(min(mirror_stage_pos), max(mirror_stage_pos)+.0001, .0001 )
-        else:
-            mirror_stage_pos = np.hstack((temp, self.stage_positions[white_fringe_ind+1:end] - white_fringe_pos))[::-1]
-            interp_stage_pos = np.arange(min(mirror_stage_pos), max(mirror_stage_pos)+.0001, .0001 )
-       
-       
-        print(interp_stage_pos)
+        mirror_stage_pos = np.hstack((temp, self.stage_positions[white_fringe_ind+1:end] - white_fringe_pos))
+     
+        interp_stage_pos = np.arange(min(mirror_stage_pos), max(mirror_stage_pos)+0.1, 0.1 )
+        
         # row-wise interpolation
         a,b = mirror_intf.shape
         interp_mirror = np.zeros((a,len(interp_stage_pos)))
- 
+       
         for i in range(a):
             interp_mirror[i,:] = np.interp(interp_stage_pos, mirror_stage_pos, mirror_intf[i,:])
         
-        self.mirror_stage_positions = interp_stage_pos
+        self.mirror_stage_positions = mirror_stage_pos
         self.mirror_PCFS_interferogram = interp_mirror # not including the first line of position
  
         #some constants
         eV2cm = 8065.54429
         cm2eV = 1 / eV2cm
-     
+
         N = len(interp_stage_pos)
-        path_length_difference = .2 * (interp_stage_pos) # NOTE: This is where we convert to path length difference space in cm.
+        path_length_difference = 0.2 * (interp_stage_pos) # NOTE: This is where we convert to path length difference space in cm.
     
         delta = (max(path_length_difference) - min(path_length_difference)) / (N-1)
-       
         zeta_eV = np.fft.fftshift(np.fft.fftfreq(N, delta)) * cm2eV * 1000 # in meV
 
         # get reciprocal space (wavenumbers).
@@ -547,3 +528,4 @@ class PCFS:
         out_dic['stage_positions'] = self.stage_positions
         out_dic['intensity'] = t
         self.Fourier[file_in] = out_dic
+
