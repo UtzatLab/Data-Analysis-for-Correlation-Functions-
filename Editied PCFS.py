@@ -531,9 +531,8 @@ class PCFS:
 
 
 
-        
         #%%
-    
+#below is an example of how you would analyze data from a PCFS simulation
 pcfs1 = PCFS(r"C:\Data and Code\Data\24_02_11_ensamble_PCFS_SIMS\Esize1", 2,simulation = True)
 
 pcfs1.get_photons_all()
